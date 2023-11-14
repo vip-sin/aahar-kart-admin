@@ -1,47 +1,48 @@
-import multiparty from 'multiparty';
-import {PutObjectCommand, S3Client} from '@aws-sdk/client-s3';
-import fs from 'fs';
-import mime from 'mime-types';
-import {mongooseConnect} from "@/lib/mongoose";
-import {isAdminRequest} from "@/pages/api/auth/[...nextauth]";
-const bucketName = 'dawid-next-ecommerce';
+import multiparty from "multiparty";
+import { BlobServiceClient, AnonymousCredential } from "@azure/storage-blob";
+import fs from "fs";
+import mime from "mime-types";
+import { mongooseConnect } from "@/lib/mongoose";
+import { isAdminRequest } from "@/pages/api/auth/[...nextauth]";
 
-export default async function handle(req,res) {
+const containerName = "testkart"; // Replace with your Azure Blob Storage container name
+
+const blobServiceClient = new BlobServiceClient(
+  `https://taaharkart.blob.core.windows.net`,
+  new AnonymousCredential()
+);
+
+const containerClient = blobServiceClient.getContainerClient(containerName);
+
+export default async function handle(req, res) {
+  console.log("req.body", req.body);
   await mongooseConnect();
-  await isAdminRequest(req,res);
+  await isAdminRequest(req, res);
 
   const form = new multiparty.Form();
-  const {fields,files} = await new Promise((resolve,reject) => {
+  const { fields, files } = await new Promise((resolve, reject) => {
     form.parse(req, (err, fields, files) => {
       if (err) reject(err);
-      resolve({fields,files});
+      resolve({ fields, files });
     });
   });
-  console.log('length:', files.file.length);
-  const client = new S3Client({
-    region: 'us-east-1',
-    credentials: {
-      accessKeyId: process.env.S3_ACCESS_KEY,
-      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-    },
-  });
+
   const links = [];
   for (const file of files.file) {
-    const ext = file.originalFilename.split('.').pop();
-    const newFilename = Date.now() + '.' + ext;
-    await client.send(new PutObjectCommand({
-      Bucket: bucketName,
-      Key: newFilename,
-      Body: fs.readFileSync(file.path),
-      ACL: 'public-read',
-      ContentType: mime.lookup(file.path),
-    }));
-    const link = `https://${bucketName}.s3.amazonaws.com/${newFilename}`;
+    const ext = file.originalFilename.split(".").pop();
+    const newFilename = Date.now() + "." + ext;
+
+    const blockBlobClient = containerClient.getBlockBlobClient(newFilename);
+
+    await blockBlobClient.uploadBrowserData(fs.readFileSync(file.path));
+
+    const link = blockBlobClient.url;
     links.push(link);
   }
-  return res.json({links});
+
+  return res.json({ links });
 }
 
 export const config = {
-  api: {bodyParser: false},
+  api: { bodyParser: false },
 };
